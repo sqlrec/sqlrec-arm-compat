@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyfg"
+version = "1.0.5.post1"
+description = "SQLREC ARM-compatible subset of pyfg"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "numpy>=1.24,<3",
+  "pyarrow>=14,<26",
+  "pyfarmhash==0.4.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
