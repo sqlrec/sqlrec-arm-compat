@@ -165,6 +165,12 @@ class FgArrowHandler:
             return []
         if isinstance(value, str):
             tokens = value.split("\x1d")
+        elif isinstance(value, list):
+            tokens = value
+            if any(not isinstance(token, str) or not token for token in tokens):
+                raise UnsupportedAPIError(
+                    f"pyfg feature {feature.name!r}: list IDs must be nonempty strings"
+                )
         elif isinstance(value, (int, np.integer)) and not isinstance(value, bool):
             tokens = [value]
         else:
@@ -197,7 +203,15 @@ class FgArrowHandler:
                         f"pyfg feature {feature.name!r}: process_arrow needs "
                         "pyarrow.Array input"
                     )
-                if not (pa.types.is_string(column.type) or pa.types.is_integer(column.type)):
+                is_string_list = (
+                    (pa.types.is_list(column.type) or pa.types.is_large_list(column.type))
+                    and pa.types.is_string(column.type.value_type)
+                )
+                if not (
+                    pa.types.is_string(column.type)
+                    or pa.types.is_integer(column.type)
+                    or is_string_list
+                ):
                     raise UnsupportedAPIError(
                         f"pyfg feature {feature.name!r}: Arrow type {column.type} "
                         "is unsupported"

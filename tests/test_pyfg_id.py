@@ -1,3 +1,4 @@
+import farmhash
 import numpy as np
 import pyarrow as pa
 import pyfg
@@ -56,6 +57,40 @@ def test_farm_hash_matches_tzrec_reference(monkeypatch):
     np.testing.assert_array_equal(output["feature"].np_lengths, [2, 1, 1])
     default, _ = fg({"value": [None]})
     assert default["feature"][0] == [20]
+
+
+def test_arrow_string_lists_are_multivalue_ids(monkeypatch):
+    monkeypatch.setenv("USE_FARM_HASH_TO_BUCKETIZE", "true")
+    fg = handler("hash_bucket_size", default="unknown", name="genres")
+    rows = [["Action", "Adventure", "Sci-Fi"], [], None, ["Comedy"]]
+    output, status = fg.process_arrow(
+        {"value": pa.array(rows, type=pa.list_(pa.string()))}
+    )
+    assert status.ok()
+    expected_tokens = ["Action", "Adventure", "Sci-Fi", "unknown", "unknown", "Comedy"]
+    np.testing.assert_array_equal(
+        output["genres"].np_values,
+        [farmhash.fingerprint64(token) % 100 for token in expected_tokens],
+    )
+    np.testing.assert_array_equal(output["genres"].np_lengths, [3, 1, 1, 1])
+
+
+def test_arrow_string_lists_without_default_keep_empty_rows(monkeypatch):
+    monkeypatch.setenv("USE_FARM_HASH_TO_BUCKETIZE", "true")
+    output, _ = handler("hash_bucket_size", name="genres").process_arrow(
+        {"value": pa.array([["Action"], [], None], type=pa.list_(pa.string()))}
+    )
+    np.testing.assert_array_equal(
+        output["genres"].np_values, [farmhash.fingerprint64("Action") % 100]
+    )
+    np.testing.assert_array_equal(output["genres"].np_lengths, [1, 0, 0])
+
+
+@pytest.mark.parametrize("row", [["Action", None], [""], [1]])
+def test_string_lists_reject_invalid_tokens(row):
+    fg = handler("hash_bucket_size", name="genres")
+    with pytest.raises(UnsupportedAPIError, match="list IDs"):
+        fg({"value": [row]})
 
 
 def test_hash_requires_farm_mode(monkeypatch):
