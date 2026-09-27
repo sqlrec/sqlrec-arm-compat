@@ -45,6 +45,13 @@ def _case(name, values, arrow_type, kind, default=""):
         _case("int_arrow", [1, 2, None, 3], "int64", "num_buckets", "0"),
         _case("hash_string", ["abc\x1defg", None, "hij"], "string", "hash_bucket_size", "xyz"),
         _case("hash_integer", [1, 2, None, 3], "int64", "hash_bucket_size", "4"),
+        _case(
+            "hash_list",
+            [["Action", "Adventure"], [], None, ["Comedy"]],
+            "list<string>",
+            "hash_bucket_size",
+            "unknown",
+        ),
     ],
     ids=lambda case: next(iter(case["data"])),
 )
@@ -68,7 +75,14 @@ def test_original_pyfg_output(case, monkeypatch):
 
     handler = pyfg.FgArrowHandler(case["config"], 1)
     data = {
-        name: pa.array(values, type=pa.type_for_alias(case["types"][name]))
+        name: pa.array(
+            values,
+            type=(
+                pa.list_(pa.string())
+                if case["types"][name] == "list<string>"
+                else pa.type_for_alias(case["types"][name])
+            ),
+        )
         for name, values in case["data"].items()
     }
     output, status = handler.process_arrow(data)

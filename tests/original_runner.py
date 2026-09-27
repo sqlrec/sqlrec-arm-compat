@@ -25,7 +25,14 @@ def main():
     pyfg.set_env("USE_FARM_HASH_TO_BUCKETIZE", "true")
     handler = pyfg.FgArrowHandler(request["config"], 1)
     data = {
-        name: pa.array(values, type=pa.type_for_alias(request["types"][name]))
+        name: pa.array(
+            values,
+            type=(
+                pa.list_(pa.string())
+                if request["types"][name] == "list<string>"
+                else pa.type_for_alias(request["types"][name])
+            ),
+        )
         for name, values in request["data"].items()
     }
     output, status = handler.process_arrow(data)
