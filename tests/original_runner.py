@@ -9,6 +9,9 @@ import pyarrow as pa
 import pyfg
 
 
+RESULT_PREFIX = "SQLREC_ORIGINAL_RESULT="
+
+
 def _jsonable(value):
     if isinstance(value, dict):
         return {key: _jsonable(item) for key, item in value.items()}
@@ -51,14 +54,16 @@ def main():
     if not status.ok():
         raise RuntimeError(status.message())
     print(
-        json.dumps(
+        RESULT_PREFIX
+        + json.dumps(
             {
                 "result": result,
                 "defaults": _jsonable(defaults),
                 "pyfg_file": pyfg.__file__,
                 "pyfg_version": version("pyfg"),
             }
-        )
+        ),
+        flush=True,
     )
 
 

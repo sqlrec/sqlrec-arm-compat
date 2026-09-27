@@ -11,6 +11,7 @@ import pytest
 
 
 ORIGINAL_PYTHON = os.environ.get("SQLREC_ORIGINAL_PYTHON")
+RESULT_PREFIX = "SQLREC_ORIGINAL_RESULT="
 pytestmark = pytest.mark.skipif(
     not ORIGINAL_PYTHON,
     reason="Set SQLREC_ORIGINAL_PYTHON to an x86 Python with original pyfg installed",
@@ -69,7 +70,13 @@ def test_original_pyfg_output(case, monkeypatch):
         cwd=runner.parent.parent,
         env=original_env,
     )
-    original = json.loads(completed.stdout)
+    result_lines = [
+        line.removeprefix(RESULT_PREFIX)
+        for line in completed.stdout.splitlines()
+        if line.startswith(RESULT_PREFIX)
+    ]
+    assert len(result_lines) == 1, completed.stdout
+    original = json.loads(result_lines[0])
     assert original["pyfg_version"] == "1.0.5"
     assert Path(original["pyfg_file"]).resolve() != Path(pyfg.__file__).resolve()
 
