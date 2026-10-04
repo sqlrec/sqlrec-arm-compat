@@ -31,8 +31,8 @@ def main():
         name: pa.array(
             values,
             type=(
-                pa.list_(pa.string())
-                if request["types"][name] == "list<string>"
+                pa.list_(pa.type_for_alias(request["types"][name][5:-1]))
+                if request["types"][name].startswith("list<")
                 else pa.type_for_alias(request["types"][name])
             ),
         )
@@ -41,8 +41,9 @@ def main():
     output, status = handler.process_arrow(data)
     if not status.ok():
         raise RuntimeError(status.message())
+    dense_names = {feature["feature_name"] for feature in request["config"]["features"] if feature["feature_type"] == "raw_feature" and not feature.get("boundaries")}
     result = {
-        name: {
+        name: {"dense_values": value.dense_values.tolist(), "values_dtype": str(value.dense_values.dtype)} if name in dense_names else {
             "values": value.np_values.tolist(),
             "lengths": value.np_lengths.tolist(),
             "values_dtype": str(value.np_values.dtype),

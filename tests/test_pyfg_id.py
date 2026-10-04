@@ -102,9 +102,8 @@ def test_hash_requires_farm_mode(monkeypatch):
 @pytest.mark.parametrize(
     "change,match",
     [
-        ({"feature_type": "raw_feature"}, "only id_feature"),
+        ({"feature_type": "combo_feature"}, "only id_feature"),
         ({"weighted": True}, "weighted"),
-        ({"separator": ","}, "separator"),
         ({"expression": "user:id"}, "item:<input>"),
         ({"value_dim": 2}, "value_dim"),
         ({"vocab_list": ["a"]}, "vocab_list"),

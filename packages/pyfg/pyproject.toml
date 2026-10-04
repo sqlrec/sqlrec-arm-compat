@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyfg"
-version = "1.0.5.post1"
+version = "1.0.5.post2"
 description = "SQLREC ARM-compatible subset of pyfg"
 requires-python = ">=3.11,<3.13"
 dependencies = [

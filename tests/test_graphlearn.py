@@ -8,7 +8,7 @@ from sqlrec_arm_compat import UnsupportedAPIError
 
 
 def test_graphlearn_import_surface_and_explicit_errors():
-    assert version("pyfg") == "1.0.5.post1"
+    assert version("pyfg") == "1.0.5.post2"
     assert version("graphlearn") == "1.3.8.post1"
     assert gl.Graph.__name__ == "Graph"
     assert gl.Nodes.__name__ == "Nodes"

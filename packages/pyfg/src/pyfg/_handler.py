@@ -1,8 +1,9 @@
-"""ID-feature subset of pyfg.FgArrowHandler used by SQLREC."""
+"""ID and continuous feature subset of pyfg.FgArrowHandler used by SQLREC."""
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -11,6 +12,7 @@ import numpy as np
 import pyarrow as pa
 
 from sqlrec_arm_compat import UnsupportedAPIError
+from pyfg._raw import RawFeature, DenseData
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,7 @@ class _Feature:
     bucket_kind: str
     bucket_count: int
     default_value: str
+    separator: str
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,7 @@ _ALLOWED_KEYS = {
     "value_dim",
     "num_buckets",
     "hash_bucket_size",
+    "separator",
 }
 
 
@@ -90,9 +94,11 @@ class FgArrowHandler:
         if not isinstance(raw, Mapping):
             raise UnsupportedAPIError("pyfg feature config must be an object")
         name = raw.get("feature_name", "<unnamed>")
+        if raw.get("feature_type") == "raw_feature":
+            return RawFeature.parse(raw)
         if raw.get("feature_type") != "id_feature":
             raise UnsupportedAPIError(
-                f"pyfg feature {name!r}: only id_feature is supported"
+                f"pyfg feature {name!r}: only id_feature and raw_feature are supported"
             )
         unsupported = set(raw) - _ALLOWED_KEYS
         if unsupported:
@@ -126,19 +132,24 @@ class FgArrowHandler:
             )
         kind = kinds[0]
         count = raw[kind]
-        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 2**63 - 1:
             raise ValueError(f"pyfg feature {name!r}: {kind} must be positive")
         default = raw.get("default_value", "")
         if not isinstance(default, str):
             raise UnsupportedAPIError(
                 f"pyfg feature {name!r}: default_value must be a string"
             )
-        return _Feature(name, input_name, kind, count, default)
+        separator = raw.get("separator", "\x1d")
+        if not isinstance(separator, str) or not separator:
+            raise ValueError("separator must be a nonempty string")
+        return _Feature(name, input_name, kind, count, default, separator)
 
     @staticmethod
     def _bucketize(feature: _Feature, token: Any) -> int:
         if feature.bucket_kind == "num_buckets":
             try:
+                if isinstance(token, str) and not re.fullmatch(r"\s*[+-]?[0-9]+\s*", token):
+                    raise ValueError("Expected a complete decimal integer")
                 value = int(token)
             except (TypeError, ValueError) as exc:
                 raise ValueError(
@@ -164,7 +175,7 @@ class FgArrowHandler:
         if value is None or value == "":
             return []
         if isinstance(value, str):
-            tokens = value.split("\x1d")
+            tokens = value.split(feature.separator)
         elif isinstance(value, list):
             tokens = value
             if any(not isinstance(token, str) or not token for token in tokens):
@@ -211,6 +222,11 @@ class FgArrowHandler:
                     pa.types.is_string(column.type)
                     or pa.types.is_integer(column.type)
                     or is_string_list
+                    or isinstance(feature, RawFeature) and (
+                        pa.types.is_floating(column.type)
+                        or pa.types.is_null(column.type)
+                        or (pa.types.is_list(column.type) and pa.types.is_floating(column.type.value_type))
+                    )
                 ):
                     raise UnsupportedAPIError(
                         f"pyfg feature {feature.name!r}: Arrow type {column.type} "
@@ -227,13 +243,17 @@ class FgArrowHandler:
                 row_count = len(values)
             elif len(values) != row_count:
                 raise ValueError("pyfg input columns must have equal lengths")
-            output[feature.name] = [self._encode_row(feature, value) for value in values]
+            output[feature.name] = [feature.encode(value) if isinstance(feature, RawFeature) else self._encode_row(feature, value) for value in values]
         return output
 
     def process_arrow(self, input_data: Mapping[str, pa.Array]):
         encoded = self._encode(input_data, require_arrow=True)
         output = {}
         for name, rows in encoded.items():
+            feature = next(feature for feature in self._features if feature.name == name)
+            if isinstance(feature, RawFeature) and not feature.boundaries:
+                output[name] = DenseData(np.asarray(rows, dtype=np.float32).reshape(-1, feature.value_dim))
+                continue
             output[name] = _SparseData(
                 np_values=np.asarray([value for row in rows for value in row], dtype=np.int64),
                 np_lengths=np.asarray([len(row) for row in rows], dtype=np.int32),
@@ -241,7 +261,11 @@ class FgArrowHandler:
         return output, _OK
 
     def __call__(self, input_data: Mapping[str, list[Any]]):
-        return self._encode(input_data, require_arrow=False), _OK
+        output = self._encode(input_data, require_arrow=False)
+        for feature in self._features:
+            if isinstance(feature, RawFeature) and feature.boundaries:
+                output[feature.name] = [row if row else None for row in output[feature.name]]
+        return output, _OK
 
     def reset_executor(self) -> None:
         return None
