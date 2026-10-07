@@ -10,6 +10,8 @@ import pyfg
 import pytest
 import numpy as np
 
+from sqlrec_arm_compat import UnsupportedAPIError
+
 
 ORIGINAL_PYTHON = os.environ.get("SQLREC_ORIGINAL_PYTHON")
 RESULT_PREFIX = "SQLREC_ORIGINAL_RESULT="
@@ -66,6 +68,8 @@ def _assert_direct_output(actual, expected, dense_names):
     [
         _case("int_string", ["1\x1d2", "", None, "3"], "string", "num_buckets"),
         _case("int_arrow", [1, 2, None, 3], "int64", "num_buckets", "0"),
+        _case("int_out_of_range", [-1, 0, 99, 100, 101, 2**63 - 1, None], "int64", "num_buckets", "99"),
+        _case("int_string_out_of_range", ["-1", "99", "100", "9223372036854775807", None], "string", "num_buckets", "99"),
         _case("hash_string", ["abc\x1defg", None, "hij"], "string", "hash_bucket_size", "xyz"),
         _case("hash_integer", [1, 2, None, 3], "int64", "hash_bucket_size", "4"),
         _case(
@@ -80,7 +84,12 @@ def _assert_direct_output(actual, expected, dense_names):
         _raw_case("zscore", [0.2,0.3,None], normalizer="method=zscore,mean=0.1,standard_deviation=10"),
         _raw_case("minmax", [0.2,0.3,None], normalizer="method=minmax,min=0.1,max=0.6"),
         _raw_case("log10", [0.1,0.01,10,None], normalizer="method=log10,threshold=0.05,default=-5"),
+        _raw_case("log10_defaults", [0, 0.05, 0.1, 1, 10, None], "float32", normalizer="method=log10"),
+        _raw_case("log10_default_fallback", [0, 0.05, 0.1, 1, 10, None], "float32", normalizer="method=log10,threshold=0.05"),
+        _raw_case("log10_default_threshold", [0, 0.05, 0.1, 1, 10, None], "float32", normalizer="method=log10,default=-5"),
         _raw_case("float_vector", [[0.2,0.5],[],None], "list<float32>", value_dim=2, default_value="0.1\x1d0.4"),
+        _raw_case("bucket_vector_empty", [[0.1,0.2],[],None], "list<float32>", value_dim=2, boundaries=[0.1,0.2], default_value=""),
+        _raw_case("bucket_vector_default", [[0.1,0.2],[],None], "list<float32>", value_dim=2, boundaries=[0.1,0.2], default_value="0.1\x1d0.3"),
         _raw_case("bucket_boundary", [0.05,0.1,0.2,0.3,None], boundaries=[0.1,0.2,0.3],default_value=""),
         _raw_case("float32_scalar", [0.2, 0.3, None], "float32", value_dim=1),
         _raw_case("scalar_list", [[0.2], [], None], "list<float32>"),
@@ -171,6 +180,30 @@ def test_original_pyfg_output(case, monkeypatch):
     defaults, status = handler({name: [None] for name in case["data"]})
     assert status.ok()
     _assert_direct_output(defaults, original["defaults"], dense_names)
+
+
+@pytest.mark.parametrize("feature_type", ["id_feature", "raw_feature"])
+@pytest.mark.parametrize("separator", ["||", "\u4e2d"])
+def test_original_rejects_unsupported_separators(feature_type, separator):
+    if feature_type == "id_feature":
+        case = _case("separator", [f"1{separator}2"], "string", "num_buckets")
+        case["config"]["features"][0]["separator"] = separator
+        original_feature = "IdFeature"
+    else:
+        case = _raw_case("separator", [f"0.1{separator}0.2"], "string", value_dim=2,
+                         default_value=f"0.1{separator}0.4", separator=separator)
+        original_feature = "RawFeature"
+    with pytest.raises(UnsupportedAPIError, match="separator"):
+        pyfg.FgArrowHandler(case["config"], 1)
+    original_env = os.environ.copy()
+    original_env.pop("PYTHONPATH", None)
+    runner = Path(__file__).with_name("original_runner.py")
+    completed = subprocess.run(
+        [ORIGINAL_PYTHON, str(runner)], input=json.dumps(case), text=True,
+        capture_output=True, check=False, cwd=runner.parent.parent, env=original_env,
+    )
+    assert completed.returncode != 0, completed.stdout
+    assert f"new {original_feature} failed" in completed.stderr, completed.stderr
 
 
 def test_original_graphlearn_import_surface():

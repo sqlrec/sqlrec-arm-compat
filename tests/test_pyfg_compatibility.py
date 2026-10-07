@@ -118,6 +118,19 @@ class OutputContractTest(unittest.TestCase):
                 self.assertTrue(status.ok())
                 self.assertEqual(output["raw"], [2, None, None])
 
+    def test_bucket_vectors_preserve_empty_rows_and_default_shape(self):
+        fg = handler(raw(value_dim=2, boundaries=[0.1, 0.2], default_value=""))
+        rows = [[0.1, 0.2], [], None]
+        direct, status = fg({"raw": rows})
+        self.assertTrue(status.ok())
+        self.assertEqual(direct["raw"], [[1, 2], [], []])
+        self.assertEqual(fg({"raw": [None]})[0]["raw"], [[]])
+        self.assertEqual(fg({"raw": []})[0]["raw"], [])
+        arrow, status = fg.process_arrow({"raw": pa.array(rows, type=pa.list_(pa.float32()))})
+        self.assertTrue(status.ok())
+        self.assertEqual(arrow["raw"].np_values.tolist(), [1, 2])
+        self.assertEqual(arrow["raw"].np_lengths.tolist(), [2, 0, 0])
+
     def test_mixed_features_keep_each_output_contract(self):
         fg = handler(
             raw(),

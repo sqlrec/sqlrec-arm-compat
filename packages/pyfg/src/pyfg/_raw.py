@@ -14,7 +14,7 @@ class DenseData:
 
 
 def number(value):
-    if isinstance(value, bool) or not isinstance(value, (str, int, float, np.number)):
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, np.integer, np.floating)):
         raise ValueError("Expected a number or numeric string")
     if isinstance(value, str) and not re.fullmatch(r"\s*[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\s*", value):
         raise ValueError("Expected a complete decimal number")
@@ -28,6 +28,8 @@ def number(value):
 
 
 def normalizer(text):
+    if not isinstance(text, str):
+        raise ValueError("normalizer must be a string")
     if not text:
         return "", {}
     parts = {}
@@ -39,8 +41,8 @@ def normalizer(text):
     method = parts.pop("method", "")
     if method == "log10":
         required = {"threshold", "default"}
-        parts.setdefault("threshold", "1e-10")
-        parts.setdefault("default", "-10")
+        parts.setdefault("threshold", "1")
+        parts.setdefault("default", "0")
     elif method == "zscore":
         required = {"mean", "standard_deviation"}
     elif method == "minmax":
@@ -88,6 +90,8 @@ class RawFeature:
         default = raw.get("default_value", "0")
         if not isinstance(separator, str) or not separator or not isinstance(default, str):
             raise ValueError("Invalid RawFeature separator/default_value")
+        if len(separator) != 1 or not separator.isascii():
+            raise UnsupportedAPIError("RawFeature separator must be a single ASCII character")
         boundaries = raw.get("boundaries", [])
         if not isinstance(boundaries, list):
             raise ValueError("boundaries must be an array")
@@ -102,7 +106,7 @@ class RawFeature:
         return feature
 
     def encode(self, value):
-        missing = value is None or value == "" or value == []
+        missing = value is None or isinstance(value, (str, list)) and not value
         if missing:
             value = self.default_value
         if isinstance(value, str):
@@ -118,6 +122,10 @@ class RawFeature:
         values = np.asarray([number(token) for token in tokens], dtype=np.float32)
         # FG defaults are already in the normalized value space.
         if not missing and self.method:
+            # Native string scalars and bucketized string lists normalize in
+            # double precision; dense lists/numeric columns use float32.
+            if isinstance(value, str) or self.boundaries and all(isinstance(token, str) for token in tokens):
+                values = np.asarray([float(token) for token in tokens], dtype=np.float64)
             p = self.params
             with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
                 if self.method == "zscore":
@@ -128,6 +136,9 @@ class RawFeature:
                     values = np.where(values > p["threshold"], np.log10(values), p["default"])
             if not np.all(np.isfinite(values)):
                 raise ValueError("Normalized values must be finite float32")
+            if np.any(np.abs(values) > float(np.finfo(np.float32).max)):
+                raise ValueError("Normalized values must be finite float32")
+            values = values.astype(np.float32)
         if self.boundaries:
             return np.searchsorted(np.asarray(self.boundaries, dtype=np.float32), values, side="right").tolist()
         return values.tolist()

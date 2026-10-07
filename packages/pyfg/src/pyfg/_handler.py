@@ -76,7 +76,7 @@ class FgArrowHandler:
     ) -> None:
         if bucketize_only:
             raise UnsupportedAPIError("pyfg bucketize_only mode is unsupported")
-        if not isinstance(threads, int) or threads < 1:
+        if isinstance(threads, bool) or not isinstance(threads, int) or threads < 1:
             raise ValueError("threads must be a positive integer")
         if threads != 1:
             raise UnsupportedAPIError("pyfg.FgArrowHandler supports only threads=1")
@@ -93,7 +93,7 @@ class FgArrowHandler:
     def _parse_feature(raw: Any) -> _Feature:
         if not isinstance(raw, Mapping):
             raise UnsupportedAPIError("pyfg feature config must be an object")
-        name = raw.get("feature_name", "<unnamed>")
+        name = raw.get("feature_name")
         if raw.get("feature_type") == "raw_feature":
             return RawFeature.parse(raw)
         if raw.get("feature_type") != "id_feature":
@@ -142,6 +142,10 @@ class FgArrowHandler:
         separator = raw.get("separator", "\x1d")
         if not isinstance(separator, str) or not separator:
             raise ValueError("separator must be a nonempty string")
+        if len(separator) != 1 or not separator.isascii():
+            raise UnsupportedAPIError("pyfg ID separator must be a single ASCII character")
+        if kind == "num_buckets" and default and not re.fullmatch(r"\s*[+-]?[0-9]+\s*", default):
+            raise UnsupportedAPIError("pyfg integer ID default_value must be a single integer")
         return _Feature(name, input_name, kind, count, default, separator)
 
     @staticmethod
@@ -155,12 +159,7 @@ class FgArrowHandler:
                 raise ValueError(
                     f"pyfg feature {feature.name!r}: expected integer ID, got {token!r}"
                 ) from exc
-            if value < 0 or value >= feature.bucket_count:
-                raise ValueError(
-                    f"pyfg feature {feature.name!r}: ID {value} is outside "
-                    f"[0, {feature.bucket_count})"
-                )
-            return value
+            return value if 0 <= value < feature.bucket_count else 0
         if os.environ.get("USE_FARM_HASH_TO_BUCKETIZE", "").lower() != "true":
             raise UnsupportedAPIError(
                 f"pyfg feature {feature.name!r}: hash_bucket_size requires "
@@ -170,12 +169,14 @@ class FgArrowHandler:
 
     @classmethod
     def _encode_row(cls, feature: _Feature, value: Any) -> list[int]:
-        if value is None or value == "" or value == []:
+        missing = value is None or isinstance(value, (str, list)) and not value
+        if missing:
             value = feature.default_value
-        if value is None or value == "":
+        if value is None or isinstance(value, str) and not value:
             return []
         if isinstance(value, str):
-            tokens = value.split(feature.separator)
+            # ID defaults are one token even when they contain the separator.
+            tokens = [value] if missing else value.split(feature.separator)
         elif isinstance(value, list):
             tokens = value
             if any(not isinstance(token, str) or not token for token in tokens):
@@ -215,17 +216,21 @@ class FgArrowHandler:
                         "pyarrow.Array input"
                     )
                 is_string_list = (
-                    (pa.types.is_list(column.type) or pa.types.is_large_list(column.type))
+                    pa.types.is_list(column.type)
                     and pa.types.is_string(column.type.value_type)
                 )
+                # Original FG accepts signed 32/64-bit integers, not arbitrary
+                # Arrow integer widths. Reject extensions rather than silently
+                # accepting data the amd64 implementation cannot process.
+                is_integer = column.type in (pa.int32(), pa.int64())
+                is_float = column.type in (pa.float32(), pa.float64())
                 if not (
                     pa.types.is_string(column.type)
-                    or pa.types.is_integer(column.type)
+                    or is_integer
                     or is_string_list
                     or isinstance(feature, RawFeature) and (
-                        pa.types.is_floating(column.type)
-                        or pa.types.is_null(column.type)
-                        or (pa.types.is_list(column.type) and pa.types.is_floating(column.type.value_type))
+                        is_float
+                        or (pa.types.is_list(column.type) and column.type.value_type in (pa.float32(), pa.float64(), pa.int32(), pa.int64()))
                     )
                 ):
                     raise UnsupportedAPIError(
@@ -294,8 +299,6 @@ class FgArrowHandler:
             if isinstance(feature, RawFeature) and feature.value_dim == 1:
                 # Direct scalar output is flat; Arrow dense output stays 2-D.
                 output[feature.name] = [row[0] if row else None for row in output[feature.name]]
-            elif isinstance(feature, RawFeature) and feature.boundaries:
-                output[feature.name] = [row if row else None for row in output[feature.name]]
         return output, _OK
 
     def reset_executor(self) -> None:

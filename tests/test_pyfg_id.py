@@ -47,6 +47,55 @@ def test_integer_arrow_and_default():
     fg.reset_executor()
 
 
+@pytest.mark.parametrize("dtype", [np.int32, np.int64, np.uint64])
+@pytest.mark.parametrize("kind", ["num_buckets", "hash_bucket_size"])
+def test_direct_numpy_integer_ids(dtype, kind, monkeypatch):
+    monkeypatch.setenv("USE_FARM_HASH_TO_BUCKETIZE", "true")
+    output, status = handler(kind, default="0")({"value": [dtype(2), None]})
+    expected = [2, 0] if kind == "num_buckets" else [
+        farmhash.fingerprint64(token) % 100 for token in ("2", "0")
+    ]
+    assert status.ok()
+    assert output["feature"] == [[value] for value in expected]
+
+
+@pytest.mark.parametrize("dtype", [pa.int64(), pa.string()])
+def test_out_of_range_integer_ids_fall_back_to_zero(dtype):
+    rows = [-1, 0, 99, 100, 101, 2**63 - 1, None]
+    if pa.types.is_string(dtype):
+        rows = [str(value) if value is not None else None for value in rows]
+    fg = handler(default="99")
+    expected = [0, 0, 99, 0, 0, 0, 99]
+    output, status = fg.process_arrow({"value": pa.array(rows, type=dtype)})
+    assert status.ok()
+    assert output["feature"].np_values.tolist() == expected
+    assert output["feature"].np_lengths.tolist() == [1] * len(rows)
+    direct, status = fg({"value": rows})
+    assert status.ok()
+    assert direct["feature"] == [[value] for value in expected]
+
+
+@pytest.mark.parametrize("token", ["12oops", "1.5"])
+def test_malformed_integer_ids_still_raise(token):
+    with pytest.raises(ValueError, match="expected integer ID"):
+        handler()({"value": [token]})
+
+
+@pytest.mark.parametrize("separator", ["||", "::", "\u4e2d"])
+def test_unsupported_id_separators_raise(separator):
+    config = {
+        "features": [{
+            "feature_type": "id_feature",
+            "feature_name": "feature",
+            "expression": "item:value",
+            "num_buckets": 100,
+            "separator": separator,
+        }]
+    }
+    with pytest.raises(UnsupportedAPIError, match="separator"):
+        pyfg.FgArrowHandler(config, 1)
+
+
 def test_farm_hash_matches_tzrec_reference(monkeypatch):
     monkeypatch.setenv("USE_FARM_HASH_TO_BUCKETIZE", "true")
     fg = handler("hash_bucket_size", default="xyz")
@@ -139,5 +188,3 @@ def test_unsupported_methods_and_input_raise():
         pyfg.FeatureFactory.create({})
     with pytest.raises(UnsupportedAPIError, match="Arrow type"):
         fg.process_arrow({"value": pa.array([1.2])})
-    with pytest.raises(ValueError, match="outside"):
-        fg.process_arrow({"value": pa.array([100])})
