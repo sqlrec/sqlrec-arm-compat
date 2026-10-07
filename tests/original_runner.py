@@ -43,7 +43,11 @@ def main():
         raise RuntimeError(status.message())
     dense_names = {feature["feature_name"] for feature in request["config"]["features"] if feature["feature_type"] == "raw_feature" and not feature.get("boundaries")}
     result = {
-        name: {"dense_values": value.dense_values.tolist(), "values_dtype": str(value.dense_values.dtype)} if name in dense_names else {
+        name: {
+            "dense_values": value.dense_values.tolist(),
+            "values_dtype": str(value.dense_values.dtype),
+            "values_shape": list(value.dense_values.shape),
+        } if name in dense_names else {
             "values": value.np_values.tolist(),
             "lengths": value.np_lengths.tolist(),
             "values_dtype": str(value.np_values.dtype),
@@ -51,6 +55,9 @@ def main():
         }
         for name, value in output.items()
     }
+    direct, status = handler(request["data"])
+    if not status.ok():
+        raise RuntimeError(status.message())
     defaults, status = handler({name: [None] for name in request["data"]})
     if not status.ok():
         raise RuntimeError(status.message())
@@ -59,6 +66,7 @@ def main():
         + json.dumps(
             {
                 "result": result,
+                "direct": _jsonable(direct),
                 "defaults": _jsonable(defaults),
                 "pyfg_file": pyfg.__file__,
                 "pyfg_version": version("pyfg"),

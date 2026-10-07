@@ -243,7 +243,27 @@ class FgArrowHandler:
                 row_count = len(values)
             elif len(values) != row_count:
                 raise ValueError("pyfg input columns must have equal lengths")
-            output[feature.name] = [feature.encode(value) if isinstance(feature, RawFeature) else self._encode_row(feature, value) for value in values]
+            rows = [
+                feature.encode(value)
+                if isinstance(feature, RawFeature)
+                else self._encode_row(feature, value)
+                for value in values
+            ]
+            if (
+                require_arrow
+                and isinstance(feature, RawFeature)
+                and feature.boundaries
+                and feature.value_dim == 1
+                and (pa.types.is_integer(column.type) or pa.types.is_floating(column.type))
+            ):
+                # Original FG uses numeric zero before bucketizing an empty
+                # scalar Arrow default, without normalizing the default.
+                # String/list input and direct calls retain missing rows.
+                zero_bucket = int(
+                    np.searchsorted(feature.boundaries, np.float32(0), side="right")
+                )
+                rows = [row if row else [zero_bucket] for row in rows]
+            output[feature.name] = rows
         return output
 
     def process_arrow(self, input_data: Mapping[str, pa.Array]):
@@ -265,6 +285,9 @@ class FgArrowHandler:
         for feature in self._features:
             if isinstance(feature, RawFeature) and feature.boundaries:
                 output[feature.name] = [row if row else None for row in output[feature.name]]
+            elif isinstance(feature, RawFeature) and feature.value_dim == 1:
+                # Direct scalar output is flat; Arrow dense output stays 2-D.
+                output[feature.name] = [row[0] for row in output[feature.name]]
         return output, _OK
 
     def reset_executor(self) -> None:

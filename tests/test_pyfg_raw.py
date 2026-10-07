@@ -27,15 +27,15 @@ def test_normalizers_leave_defaults_in_encoded_value_space(normalizer, expected)
     output, _ = handler(normalizer=normalizer).process_arrow({"input": pa.array([0.2,0.3,None])})
     np.testing.assert_allclose(output["price"].dense_values, expected, rtol=1e-6)
     defaults, _ = handler(normalizer=normalizer)({"input": [None]})
-    np.testing.assert_allclose(defaults["price"], [[0.1]])
+    np.testing.assert_allclose(defaults["price"], [0.1])
 
 
 def test_vector_and_bucket_boundaries():
     output, _ = handler(value_dim=2, default_value="0.1|0.4", separator="|").process_arrow({"input": pa.array([[0.2,0.5], [], None], type=pa.list_(pa.float32()))})
     np.testing.assert_allclose(output["price"].dense_values, [[0.2,0.5],[0.1,0.4],[0.1,0.4]])
     output, _ = handler(boundaries=[0.1,0.2,0.3], default_value="").process_arrow({"input": pa.array([0.05,0.1,0.2,0.3,None])})
-    assert output["price"].np_values.tolist() == [0,1,2,3]
-    assert output["price"].np_lengths.tolist() == [1,1,1,1,0]
+    assert output["price"].np_values.tolist() == [0,1,2,3,0]
+    assert output["price"].np_lengths.tolist() == [1,1,1,1,1]
     default, _ = handler(boundaries=[0.1], default_value="")({"input": [None]})
     assert default["price"] == [None]
 
