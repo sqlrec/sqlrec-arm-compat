@@ -250,19 +250,27 @@ class FgArrowHandler:
                 for value in values
             ]
             if (
-                require_arrow
-                and isinstance(feature, RawFeature)
+                isinstance(feature, RawFeature)
                 and feature.boundaries
                 and feature.value_dim == 1
-                and (pa.types.is_integer(column.type) or pa.types.is_floating(column.type))
             ):
-                # Original FG uses numeric zero before bucketizing an empty
-                # scalar Arrow default, without normalizing the default.
-                # String/list input and direct calls retain missing rows.
-                zero_bucket = int(
-                    np.searchsorted(feature.boundaries, np.float32(0), side="right")
-                )
-                rows = [row if row else [zero_bucket] for row in rows]
+                if require_arrow:
+                    numeric_input = (
+                        pa.types.is_integer(column.type)
+                        or pa.types.is_floating(column.type)
+                    )
+                else:
+                    numeric_input = any(value is not None for value in values) and all(
+                        value is None
+                        or isinstance(value, (int, float, np.integer, np.floating))
+                        for value in values
+                    )
+                if numeric_input:
+                    # Original FG bucketizes numeric nulls as unnormalized zero.
+                    zero_bucket = int(
+                        np.searchsorted(feature.boundaries, np.float32(0), side="right")
+                    )
+                    rows = [row if row else [zero_bucket] for row in rows]
             output[feature.name] = rows
         return output
 
@@ -283,11 +291,11 @@ class FgArrowHandler:
     def __call__(self, input_data: Mapping[str, list[Any]]):
         output = self._encode(input_data, require_arrow=False)
         for feature in self._features:
-            if isinstance(feature, RawFeature) and feature.boundaries:
-                output[feature.name] = [row if row else None for row in output[feature.name]]
-            elif isinstance(feature, RawFeature) and feature.value_dim == 1:
+            if isinstance(feature, RawFeature) and feature.value_dim == 1:
                 # Direct scalar output is flat; Arrow dense output stays 2-D.
-                output[feature.name] = [row[0] for row in output[feature.name]]
+                output[feature.name] = [row[0] if row else None for row in output[feature.name]]
+            elif isinstance(feature, RawFeature) and feature.boundaries:
+                output[feature.name] = [row if row else None for row in output[feature.name]]
         return output, _OK
 
     def reset_executor(self) -> None:

@@ -98,7 +98,25 @@ class OutputContractTest(unittest.TestCase):
         output, _ = fg.process_arrow({"raw": pa.array([None, 0.1, None])})
         self.assertEqual(output["raw"].np_values.tolist(), [2, 1, 2])
         self.assertEqual(output["raw"].np_lengths.tolist(), [1, 1, 1])
-        self.assertEqual(fg({"raw": [None]})[0]["raw"], [[2]])
+        self.assertEqual(fg({"raw": [None]})[0]["raw"], [2])
+
+    def test_direct_bucket_scalars_match_original_numeric_nulls(self):
+        fg = handler(raw(boundaries=[-1, 0, 1], default_value="", normalizer="method=zscore,mean=10,standard_deviation=1"))
+        for values in ([0.0, None], [0, None]):
+            with self.subTest(values=values):
+                output, status = fg({"raw": values})
+                self.assertTrue(status.ok())
+                self.assertEqual(output["raw"], [0, 2])
+        self.assertEqual(fg({"raw": [None]})[0]["raw"], [None])
+        self.assertEqual(fg({"raw": []})[0]["raw"], [])
+
+    def test_direct_bucket_strings_and_lists_preserve_missing_rows(self):
+        fg = handler(raw(boundaries=[0.1, 0.2], default_value=""))
+        for values in (["0.2", "", None], [[0.2], [], None]):
+            with self.subTest(values=values):
+                output, status = fg({"raw": values})
+                self.assertTrue(status.ok())
+                self.assertEqual(output["raw"], [2, None, None])
 
     def test_mixed_features_keep_each_output_contract(self):
         fg = handler(

@@ -14,12 +14,12 @@ hash features so bucket IDs remain portable between x86 and ARM.
 
 Supported `pyfg` calls are `FgArrowHandler(..., 1)`, `process_arrow`, direct
 handler calls for default values, `reset_executor`, `set_env`, and `unset_env`.
-Direct dense scalar calls return one scalar per row; vectors retain their inner
+Direct raw scalar calls return one scalar per row; vectors retain their inner
 dimension. Arrow dense outputs always have shape `(rows, value_dim)`.
 For bucketized raw features with an empty default, numeric scalar Arrow nulls
-use numeric zero before bucketization, bypassing normalization. Direct calls and
-string/list Arrow inputs retain missing rows. This follows the original wheel's
-distinct output paths.
+and nulls in direct numeric scalar columns use numeric zero before bucketization,
+bypassing normalization. String/list inputs and all-null direct columns retain
+missing rows. This follows the original wheel's distinct output paths.
 Other feature configurations, handler methods, and graphlearn sampling calls
 raise `UnsupportedAPIError` with the unsupported name. The graphlearn modules
 exist so TorchEasyRec can import its sampler module when no sampler is configured.

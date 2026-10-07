@@ -99,6 +99,13 @@ def _assert_direct_output(actual, expected, dense_names):
 )
 def test_original_pyfg_output(case, monkeypatch):
     monkeypatch.setenv("USE_FARM_HASH_TO_BUCKETIZE", "true")
+    # Original direct list columns cannot mix nested lists with None rows.
+    direct_data = {
+        name: [value if value is not None else [] for value in values]
+        if case["types"][name].startswith("list<") else values
+        for name, values in case["data"].items()
+    }
+    case = {**case, "direct_data": direct_data}
     original_env = os.environ.copy()
     original_env.pop("PYTHONPATH", None)
     runner = Path(__file__).with_name("original_runner.py")
@@ -107,10 +114,11 @@ def test_original_pyfg_output(case, monkeypatch):
         input=json.dumps(case),
         text=True,
         capture_output=True,
-        check=True,
+        check=False,
         cwd=runner.parent.parent,
         env=original_env,
     )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
     result_lines = [
         line.removeprefix(RESULT_PREFIX)
         for line in completed.stdout.splitlines()
@@ -157,7 +165,7 @@ def test_original_pyfg_output(case, monkeypatch):
             np.testing.assert_allclose(feature["dense_values"], original["result"][name]["dense_values"], rtol=1e-6,atol=1e-7)
         else:
             assert feature == original["result"][name]
-    direct, status = handler(case["data"])
+    direct, status = handler(direct_data)
     assert status.ok()
     _assert_direct_output(direct, original["direct"], dense_names)
     defaults, status = handler({name: [None] for name in case["data"]})

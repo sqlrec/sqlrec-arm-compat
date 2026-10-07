@@ -55,7 +55,7 @@ def main():
         }
         for name, value in output.items()
     }
-    direct, status = handler(request["data"])
+    direct, status = handler(request.get("direct_data", request["data"]))
     if not status.ok():
         raise RuntimeError(status.message())
     defaults, status = handler({name: [None] for name in request["data"]})
