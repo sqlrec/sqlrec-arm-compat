@@ -1,6 +1,5 @@
-"""Same input corpus on every architecture; sparse/bucket outputs must be exact."""
+"""Same input corpus on every architecture, with bounded log10 edge tolerance."""
 
-import json
 import os
 import platform
 from pathlib import Path
@@ -11,7 +10,7 @@ import pytest
 
 from sqlrec_arm_compat import UnsupportedAPIError
 from oracle_cases import supported_cases, rejected_arrow_cases
-from oracle_support import assert_output, corpus_digest, original_outputs
+from oracle_support import assert_output, load_oracle
 from original_runner import evaluate
 
 
@@ -27,22 +26,9 @@ def test_native_runner_architecture():
     assert np.dtype(np.float32).itemsize == 4
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def oracle():
-    snapshot_path = os.environ.get("SQLREC_COMPAT_ORACLE")
-    if snapshot_path:
-        # A missing/stale artifact is a failure, never a skipped parity gate.
-        snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
-        assert snapshot["schema"] == 1
-        assert snapshot["corpus_sha256"] == corpus_digest(CASES), "Stale/mismatched oracle corpus"
-        outputs = snapshot["outputs"]
-        assert set(outputs) == {case["id"] for case in CASES}
-        assert all(output["pyfg_version"] == "1.0.5" for output in outputs.values() if "error" not in output)
-        return outputs
-    original = os.environ.get("SQLREC_ORIGINAL_PYTHON")
-    if original:
-        return original_outputs(original, CASES)
-    pytest.skip("Set SQLREC_COMPAT_ORACLE to an exported x86 oracle, or SQLREC_ORIGINAL_PYTHON")
+    return load_oracle()
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["id"])

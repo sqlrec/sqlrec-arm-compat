@@ -22,50 +22,67 @@ oracle case and a fail-fast test for neighboring unsupported configurations.
 `oracle_cases.py` uses architecture-independent JSON scalars and a fixed random
 seed. `export_oracle.py` runs the original **x86 pyfg 1.0.5** in an isolated process;
 compat output is never used to generate expected values. Corpus hashes and exact
-case IDs prevent stale/partial artifacts from silently passing. Rejected cases
+case IDs prevent stale/partial reference files from silently passing. Rejected cases
 must fail on both sides, although native RuntimeError and compat UnsupportedAPIError
 are intentionally not required to have identical exception classes/messages.
 
 The direct original binding has inconsistent NumPy scalar conversion. Such
-objects are covered by local NumPy 1/2 regression tests rather than falsely
+objects are covered by local regression tests in the pinned runtime rather than falsely
 claiming equality with that native binding. Arrow null rows in nested lists remain
 in the oracle, but the original direct nested-list path uses empty lists because
 its binding does not accept mixed nested-list/None columns.
 
-## Native CI gates
+## Deployment CI gate
 
-SQLREC's `_build-images.yml` resolves one compat commit and exports one x86 oracle.
-The same commit and artifact are tested on **native amd64 and arm64**, without QEMU:
+SQLREC resolves one compat revision, including the committed original x86
+reference file `tests/data/x86-oracle.json`. Ordinary CI runs do not regenerate
+or transfer this file. When changing the corpus, runtime pins or original-wheel
+requirements, export it again in an original Linux amd64 Python 3.11 environment
+with `python tests/export_oracle.py` and commit it with the change.
+The existing TZRec image jobs build and run integration checks on amd64 and arm64.
+Only the ARM image installs the replacement library, so its final image runs the
+complete compat suite once, with mandatory TZRec integration, before publication.
+The ARM runner is native; no emulation is used for the deployment gate.
 
-| Profile | Python | NumPy | Arrow |
-| --- | --- | --- | --- |
-| minimum-py311 | 3.11 | 1.24.4 | 14.0.2 |
-| reference-py311 | 3.11 | 1.26.4 | 17.0.0 |
-| numpy2-py311 | 3.11 | Latest supported 2.x | Latest supported `<26` |
-| numpy2-py312 | 3.12 | Latest supported 2.x | Latest supported `<26` |
+`requirements-runtime.txt` pins NumPy 1.26.4, PyArrow 17.0.0 and pyfarmhash 0.4.0.
+Python 3.11 is fixed in the Dockerfiles and package metadata. Local tests install
+`requirements-test.txt` and the current checkout's editable packages, then call
+`scripts/test.py` in that environment. The same entry point runs against installed
+wheels inside the final ARM image through `scripts/test_image.sh`. Test tools live
+only in a disposable container. The Dockerfiles pin deployment versions directly;
+keep them aligned with the test requirements and package metadata. Image tests
+install only pytest/coverage, then verify the existing NumPy/PyArrow/pyfarmhash
+versions before running the suite.
 
-Tests install built pyfg/graphlearn wheels; pyfarmhash is compiled for the native
-architecture. A machine assertion detects wrong-architecture execution. Dense
-outputs allow at most two float32 ULPs with a relative/absolute safety bound and
-signed-zero preservation. Sparse IDs and buckets are exact, with no tolerance.
-Both TZRec images depend on the complete native matrix; existing image smoke tests
-then exercise actual TZRec/DataParser/model/native-server integration.
-The Docker test target also requires 100% measured Python statement/branch coverage
-for pyfg, graphlearn and sqlrec_arm_compat. This does not certify all input values or
-cover the internal native FarmHash implementation; the oracle handles that layer.
+The entry point executes all tests, rejects unexpected skips, prints actual
+versions, and produces JUnit and coverage reports. It requires 100% measured
+Python statement/branch coverage for pyfg, graphlearn and sqlrec_arm_compat.
+This does not cover internal native FarmHash code; the original oracle checks
+its output. Missing/stale/incomplete oracles fail. `--unit-only` explicitly
+selects a smaller suite. Oracle digests include the corpus, runtime pins and
+original-wheel requirements. Local tests and plain pytest use the committed
+reference by default; explicit oracle/original-interpreter overrides are retained.
+
+Dense outputs use `rtol=1e-5, atol=1e-7` with signed-zero preservation. Sparse
+IDs, row lengths, shapes and dtypes are exact. The three adjacent-boundary log10
+cases allow a bucket difference only if normalized values and every crossed
+boundary are within four float32 ULPs of the original normalized value. Their
+native dense normalization is exported with the buckets; wider errors fail.
+The business test cases and these tolerances are unchanged by CI simplification.
 
 ## Explicit limits
 
 - No finite test suite exhausts every input, dependency patch version, CPU/compiler
-  or operating system. The matrix is a regression gate, not a proof of universal
+  or operating system. The deployment test is a regression gate, not a proof of universal
   numerical identity. Every newly reported production input should become a case.
-- Test supported major-version endpoints and representative combinations, not the
-  full Cartesian product of every NumPy/Arrow release. Linux little-endian
-  amd64/arm64 is the deployment target; other architectures are not certified.
+- Only the pinned TZRec deployment runtime is certified. Linux little-endian
+  amd64/arm64 is the deployment target; other Python/NumPy versions and
+  architectures are outside the test contract.
 - Do not claim native ARM verification from an amd64-only local run. CI must run
   after pushing both compat changes and the parent workflow changes.
 - TorchEasyRec integration is optional in the standalone compat environment and
-  must run in the actual TZRec images; no substitute Torch environment is installed
+  can be made mandatory with `scripts/test.py --require-tzrec`. It must run
+  in the actual TZRec images; no substitute Torch environment is installed
   solely to remove a skip.
 - Weighted/user/sequence/combo features, sampling/training through graphlearn,
   multiple FG executor threads, and `bucketize_only` are outside this subset.

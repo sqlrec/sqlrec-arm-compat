@@ -3,9 +3,12 @@ import pyarrow as pa
 import pytest
 
 
-def test_sqlrec_id_feature_path(monkeypatch):
+def test_sqlrec_id_feature_path(monkeypatch, request):
     monkeypatch.setenv("USE_FARM_HASH_TO_BUCKETIZE", "true")
-    pytest.importorskip("tzrec")
+    if request.config.getoption("--require-tzrec"):
+        import tzrec
+    else:
+        pytest.importorskip("tzrec")
     from tzrec.datasets.data_parser import DataParser
     from tzrec.features.id_feature import IdFeature
     from tzrec.protos import feature_pb2

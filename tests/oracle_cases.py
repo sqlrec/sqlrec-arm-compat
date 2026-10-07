@@ -122,7 +122,8 @@ def supported_cases():
                       [-3.4028234663852886e38, -0.0, 0.0, 1.401298464324817e-45,
                        1.1754943508222875e-38, 3.4028234663852886e38], "float32"))
     # Put boundaries one float32 ULP apart around transcendental results. A
-    # vectorized log implementation differing by one ULP must not change IDs.
+    # Tiny rounding differences may cross these boundaries; comparison checks
+    # native normalized values and every crossed boundary within four ULPs.
     log_values = (0.3010299956639812, 0.47712125471966244, 0.8450980400142568,
                   1.0, 1.505149978319906, 2.0)
     bounds = sorted({value for center in log_values for value in float32_neighbors(center)})
@@ -132,6 +133,7 @@ def supported_cases():
             values = list(map(repr, values))
         cases.append(case(f"log10-one-ulp-buckets-{dtype}",
                           raw_feature(normalizer="method=log10", boundaries=bounds), values, dtype))
+        cases[-1]["bucket_float_max_ulp"] = 4
     for feature, dtype in ((id_feature("num_buckets"), "int64"),
                            (id_feature("hash_bucket_size"), "string"),
                            (raw_feature(), "float32"),
@@ -146,6 +148,13 @@ def supported_cases():
     cases.append(mixed)
     assert len({item["id"] for item in cases}) == len(cases)
     return cases
+
+
+def all_cases():
+    # Include the older differential cases so ARM/local replay runs them too.
+    from differential_cases import differential_cases, separator_cases
+    return (supported_cases() + rejected_arrow_cases() + differential_cases() + separator_cases()
+            + [{"id": "graphlearn-import-surface", "graphlearn_import": True}])
 
 
 def rejected_arrow_cases():

@@ -22,7 +22,7 @@ Supported `pyfg` calls are `FgArrowHandler(..., 1)`, `process_arrow`, direct
 handler calls for default values, `reset_executor`, `set_env`, and `unset_env`.
 Direct raw scalar calls return one scalar per row; vectors retain their inner
 dimension. Arrow dense outputs always have shape `(rows, value_dim)`.
-Direct calls accept NumPy integer and floating-point scalars with NumPy 1 and 2.
+Direct calls accept NumPy integer and floating-point scalars.
 Supported Arrow scalars are `string`, signed `int32/int64`, and (for raw features)
 `float32/float64`. Ordinary `list<string>` is supported for both feature kinds;
 raw vectors also accept `list<int32/int64/float32/float64>`. Other integer widths,
@@ -41,82 +41,102 @@ exist so TorchEasyRec can import its sampler module when no sampler is configure
 
 ## Develop and test
 
-Use Python 3.11 on ARM or x86:
+The deployment runtime is Python 3.11. `requirements-runtime.txt` pins NumPy,
+PyArrow and pyfarmhash for test environments. The TZRec Dockerfile pins NumPy and
+PyArrow directly; this project's Dockerfile pins pyfarmhash directly. Keep these
+versions and package metadata aligned when updating deployment dependencies.
+`requirements-test.txt` adds pytest and coverage. No version matrix or environment
+auto-discovery is used.
+
+Create or activate one Python 3.11 test environment, then install dependencies
+and the current checkout as editable packages:
 
 ```sh
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -e ./packages/pyfg -e ./packages/graphlearn 'pytest>=8,<10'
-.venv/bin/python -m pytest -q
+python3.11 -m venv .venv/test
+.venv/test/bin/python -m pip install -r requirements-test.txt
+.venv/test/bin/python -m pip install --no-deps -e ./packages/pyfg -e ./packages/graphlearn
+.venv/test/bin/python scripts/test.py
 ```
 
-On an ARM Docker engine, run the same tests with:
+On Windows, use the environment's `Scripts/python.exe` instead of `bin/python`.
+Native dependencies must be available for Python 3.11; this change does not add
+Windows FarmHash support. An activated environment can simply run:
 
 ```sh
-docker build -t sqlrec-arm-compat:test .
-docker run --rm sqlrec-arm-compat:test
+python scripts/test.py
 ```
 
-The differential test skips unless `SQLREC_ORIGINAL_PYTHON` names a separate
-x86 Python environment with Alibaba's original `pyfg` and `graphlearn` wheels.
-It compares ID and raw values, row lengths, NumPy dtypes, dense shapes, direct
-calls, encoded defaults, normalizers, boundary equality, nulls across numeric,
-string and list Arrow types, and the
-graphlearn import surface directly:
+The entry point uses the current interpreter and runs every test, rejects
+unexpected skips, checks deployment dependency versions, and enforces 100%
+Python statement and branch coverage. It prints versions to the console and saves
+JUnit and coverage reports under `.venv/test-reports/`; `--reports DIR` changes
+the output directory. It does not install dependencies or require Docker.
+
+Full tests use the committed `tests/data/x86-oracle.json`, exported from the
+original Linux amd64 Python 3.11 wheels. Both local and image tests read this
+file by default; no separate reference environment or download is needed for
+ordinary test runs.
+
+When changing oracle cases, dependency pins or original-wheel versions,
+regenerate the file in a separate original-wheel environment and commit it
+together with the change:
 
 ```sh
-python3.11 -m venv /path/to/original-x86-venv
-/path/to/original-x86-venv/bin/python -m pip install \
-  'numpy<2' 'pyarrow==17.0.0' \
-  'https://tzrec.oss-accelerate.aliyuncs.com/third_party/pyfg-1.0.5-cp311-cp311-linux_x86_64.whl' \
-  'https://tzrec.oss-accelerate.aliyuncs.com/third_party/graphlearn/graphlearn-1.3.8-cp311-cp311-linux_x86_64.whl'
-SQLREC_ORIGINAL_PYTHON=/path/to/original-x86-venv/bin/python \
-  .venv/bin/python -m pytest -q tests/test_differential.py
+python3.11 -m venv .venv/original
+.venv/original/bin/python -m pip install -r requirements-oracle.txt
+.venv/original/bin/python tests/export_oracle.py
 ```
 
-Export the broader original-wheel corpus once on amd64, then replay the same file
-on ARM (or another NumPy/Arrow version) without needing the original native wheel:
+The exporter writes `tests/data/x86-oracle.json` by default; a positional path
+can select a different destination. Never generate reference values from compat.
+The oracle digest includes the corpus, runtime pins and original-wheel requirements;
+stale or incomplete snapshots fail. Changing the pinned original pyfg version
+also requires updating its version checks in the oracle helpers.
+
+Instead of a saved oracle, the test entry point can directly compare with a
+separate original environment:
 
 ```sh
-SQLREC_ORIGINAL_PYTHON=/path/to/original-x86-venv/bin/python \
-  .venv/bin/python tests/export_oracle.py .venv/x86-oracle.json
-SQLREC_COMPAT_ORACLE=/absolute/path/to/x86-oracle.json \
-  .venv/bin/python -m pytest -q
+.venv/test/bin/python scripts/test.py --original-python /absolute/path/to/original/bin/python
 ```
 
-The corpus covers integer limits, UTF-8/NUL/long FarmHash inputs, defaults,
-empty/all-null batches, vector dimensions, shared inputs, every normalizer,
-float32 neighbors and exact sparse buckets. Dense results allow at most two
-float32 ULPs (and preserve signed zero); integer values, lengths, shapes and dtypes
-must match exactly. A missing or stale specified oracle fails instead of skipping.
-See [test coverage and limits](tests/COVERAGE.md) for the complete scope.
+`--oracle FILE`, `SQLREC_COMPAT_ORACLE` and `SQLREC_ORIGINAL_PYTHON` are also
+supported. Explicit command-line options take precedence. To deliberately run
+without original parity tests, use `python scripts/test.py --unit-only`.
+A plain pytest run also uses the committed reference file by default.
 
-The source is pure Python. Its `pyfarmhash` dependency contains a native
-extension, so installation on ARM needs a C++ compiler or a prebuilt ARM wheel
-for that dependency. The optional TorchEasyRec integration test runs when
-`tzrec` and its runtime dependencies are installed.
+Dense floats use `rtol=1e-5, atol=1e-7` and preserve signed zero. Sparse IDs,
+lengths, shapes and dtypes must match exactly. Only the three
+`log10-one-ulp-buckets-*` cases allow a bucket difference: normalized-value
+error and every crossed boundary must be within four float32 ULPs of the original
+normalized value. Wider bucket errors fail. See [coverage and limits](tests/COVERAGE.md).
+
+TZRec integration is the only optional skip in standalone tests. With TZRec
+installed, add `--require-tzrec`. A local pass covers the current architecture;
+the deployment gate runs all tests in the native ARM TZRec image.
 
 ## SQLREC image CI
 
-Push this source repository to `sqlrec/sqlrec-arm-compat` on the `master`
-branch. The SQLREC image workflow owns the CI for this project; this repository
-does not need its own workflow. For each TZRec image run, SQLREC resolves the
-selected `arm_compat_ref` branch once, runs the differential tests on a native
-x86 runner against the original pyfg and graphlearn wheels, then checks out the
-same revision on native amd64 and ARM runners. Both architectures replay the
-exported original-wheel corpus and test installed wheels with NumPy 1/2,
-Arrow 14/17/latest supported, and Python 3.11/3.12. The native test matrix must
-pass before either TZRec image can build/publish. The ARM job then builds the
-pyfg, graphlearn, and pyfarmhash wheels and installs them in the
-TZRec ARM image. The manual SQLREC image workflow can select another branch;
-release builds use `master`.
+SQLREC resolves one compat revision, which includes its reference file.
+The existing TZRec jobs build and verify both image architectures. After the ARM
+image is built, SQLREC calls this repository's
+`scripts/test_image.sh`. That helper runs every test against the image's installed
+replacement wheels, with mandatory TZRec integration, before publication.
+Test tools are installed only in a disposable container. The amd64 image retains
+the original pyfg/graphlearn wheels and its existing integration checks.
 
-Build both replacement wheels from the project root:
+Image dependency versions are written directly in the Dockerfiles; no compat
+requirements file or test configuration is copied into the TZRec image. The
+standalone compatibility Dockerfile only builds wheels; it has no test or oracle
+stages. Push changes to this repository and the parent workflow together.
+
+To test a locally built native ARM TZRec image, run from this repository:
 
 ```sh
-.venv/bin/python -m pip wheel --no-deps -w dist ./packages/pyfg ./packages/graphlearn
+bash scripts/test_image.sh IMAGE /path/to/reports
 ```
 
-On an ARM Docker engine, the wheel stage builds all three wheels in one step:
+Build replacement wheels on a native ARM Docker engine:
 
 ```sh
 docker build --platform linux/arm64 --target wheels --output type=local,dest=dist .

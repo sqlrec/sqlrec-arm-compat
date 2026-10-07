@@ -6,6 +6,8 @@ import numpy as np
 import pyarrow as pa
 import pyfg
 
+from float_support import assert_float_output
+
 
 def raw(name="raw", **options):
     feature = {
@@ -32,13 +34,13 @@ class OutputContractTest(unittest.TestCase):
                 direct, status = fg({"raw": rows})
                 self.assertTrue(status.ok())
                 self.assertEqual(np.asarray(direct["raw"]).shape, (len(rows),))
-                np.testing.assert_allclose(direct["raw"], expected)
+                assert_float_output(direct["raw"], expected)
                 dtype = pa.string() if rows and isinstance(rows[0], str) else pa.float64()
                 arrow, status = fg.process_arrow({"raw": pa.array(rows, type=dtype)})
                 self.assertTrue(status.ok())
                 self.assertEqual(arrow["raw"].dense_values.dtype, np.float32)
                 self.assertEqual(arrow["raw"].dense_values.shape, (len(rows), 1))
-                np.testing.assert_allclose(arrow["raw"].dense_values, np.asarray(expected).reshape(-1, 1))
+                assert_float_output(arrow["raw"].dense_values, np.asarray(expected).reshape(-1, 1))
 
     def test_scalar_normalizers_preserve_default_shape_and_values(self):
         cases = [
@@ -49,15 +51,15 @@ class OutputContractTest(unittest.TestCase):
         for normalizer, value in cases:
             with self.subTest(normalizer=normalizer):
                 direct, _ = handler(raw(normalizer=normalizer))({"raw": [0.2, None, "", []]})
-                np.testing.assert_allclose(direct["raw"], [value, 0.1, 0.1, 0.1], rtol=1e-6)
+                assert_float_output(direct["raw"], [value, 0.1, 0.1, 0.1])
 
     def test_vector_direct_rows_keep_their_dimension(self):
         fg = handler(raw(value_dim=2, default_value="0.1|0.4", separator="|"))
         rows = [[0.2, 0.5], [], None, "0.3|0.6"]
         direct, _ = fg({"raw": rows})
-        np.testing.assert_allclose(direct["raw"], [[0.2, 0.5], [0.1, 0.4], [0.1, 0.4], [0.3, 0.6]])
+        assert_float_output(direct["raw"], [[0.2, 0.5], [0.1, 0.4], [0.1, 0.4], [0.3, 0.6]])
         arrow, _ = fg.process_arrow({"raw": pa.array(rows[:3], type=pa.list_(pa.float32()))})
-        np.testing.assert_allclose(arrow["raw"].dense_values, direct["raw"][:3])
+        assert_float_output(arrow["raw"].dense_values, direct["raw"][:3])
         empty, _ = fg.process_arrow({"raw": pa.array([], type=pa.list_(pa.float32()))})
         self.assertEqual(empty["raw"].dense_values.shape, (0, 2))
         self.assertEqual(fg({"raw": []})[0]["raw"], [])
@@ -139,8 +141,8 @@ class OutputContractTest(unittest.TestCase):
             {"feature_type": "id_feature", "feature_name": "id", "expression": "item:id", "num_buckets": 10},
         )
         direct, _ = fg({"raw": [None], "vector": [None], "bucket": [None], "id": [None]})
-        np.testing.assert_allclose(direct["raw"], [0.1])
-        np.testing.assert_allclose(direct["vector"], [[0.1, 0.4]])
+        assert_float_output(direct["raw"], [0.1])
+        assert_float_output(direct["vector"], [[0.1, 0.4]])
         self.assertEqual(direct["bucket"], [None])
         self.assertEqual(direct["id"], [[]])
 

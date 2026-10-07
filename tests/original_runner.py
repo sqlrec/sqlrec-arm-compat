@@ -1,8 +1,10 @@
 """Run in a separate x86 Python environment containing the original pyfg."""
 
 import json
+import copy
 import os
 import platform
+from pathlib import Path
 import sys
 from importlib.metadata import version
 
@@ -33,6 +35,14 @@ def _jsonable(value):
 
 
 def evaluate(request):
+    if request.get("graphlearn_import"):
+        import graphlearn as gl
+        from graphlearn.python.data.values import Values
+        return {
+            "graphlearn": {"version": version("graphlearn"),
+                           "names": [gl.Graph.__name__, gl.Nodes.__name__, gl.Decoder.__name__, Values.__name__]},
+            "pyfg_version": version("pyfg"), "pyfg_file": pyfg.__file__, "machine": platform.machine(),
+        }
     os.environ["USE_FARM_HASH_TO_BUCKETIZE"] = "true"
     pyfg.set_env("USE_FARM_HASH_TO_BUCKETIZE", "true")
     handler = pyfg.FgArrowHandler(request["config"], 1)
@@ -67,7 +77,7 @@ def evaluate(request):
     defaults, status = handler({name: [None] for name in request["data"]})
     if not status.ok():
         raise RuntimeError(status.message())
-    return {
+    result = {
         "result": result,
         "direct": _jsonable(direct),
         "defaults": _jsonable(defaults),
@@ -75,9 +85,22 @@ def evaluate(request):
         "pyfg_version": version("pyfg"),
         "machine": platform.machine(),
     }
+    if request.get("bucket_float_max_ulp"):
+        dense_request = copy.deepcopy(request)
+        dense_request.pop("bucket_float_max_ulp")
+        for feature in dense_request["config"]["features"]:
+            feature.pop("boundaries", None)
+        # Collect the native normalization too; never reconstruct it with compat.
+        result["normalized"] = evaluate(dense_request)
+    return result
 
 
 def main():
+    assert sys.version_info[:2] == (3, 11), "Original oracle requires Python 3.11"
+    for requirement in (Path(__file__).resolve().parents[1] / "requirements-runtime.txt").read_text(encoding="utf-8").splitlines():
+        name, expected = requirement.split("==")
+        if name != "pyfarmhash":
+            assert version(name) == expected, f"Original oracle requires {requirement}"
     request = json.load(sys.stdin)
     if "cases" in request:
         result = []
