@@ -19,7 +19,7 @@ def test_sqlrec_id_feature_path(monkeypatch, request):
         (
             "genres", "hash_bucket_size", 100,
             [["Action", "Adventure"], [], None],
-            [farmhash.fingerprint64(value) % 100 for value in ("Action", "Adventure")],
+            [farmhash.Fingerprint64(value) % 100 for value in ("Action", "Adventure")],
             [2, 0, 0],
         ),
     ]

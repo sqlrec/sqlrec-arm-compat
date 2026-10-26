@@ -44,14 +44,14 @@ Only the ARM image installs the replacement library, so its final image runs the
 complete compat suite once, with mandatory TZRec integration, before publication.
 The ARM runner is native; no emulation is used for the deployment gate.
 
-`requirements-runtime.txt` pins NumPy 1.26.4, PyArrow 17.0.0 and pyfarmhash 0.4.0.
+`requirements-runtime.txt` pins NumPy 1.26.4, PyArrow 17.0.0 and cityhash 0.4.10.
 Python 3.11 is fixed in the Dockerfiles and package metadata. Local tests install
 `requirements-test.txt` and the current checkout's editable packages, then call
 `scripts/test.py` in that environment. The same entry point runs against installed
 wheels inside the final ARM image through `scripts/test_image.sh`. Test tools live
 only in a disposable container. The Dockerfiles pin deployment versions directly;
 keep them aligned with the test requirements and package metadata. Image tests
-install only pytest/coverage, then verify the existing NumPy/PyArrow/pyfarmhash
+install only pytest/coverage, then verify the existing NumPy/PyArrow/cityhash
 versions before running the suite.
 
 The entry point executes all tests, rejects unexpected skips, prints actual

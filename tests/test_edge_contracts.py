@@ -207,7 +207,7 @@ def test_repeated_calls_reset_and_failure_do_not_mutate_inputs_or_outputs():
 def test_hash_default_is_one_token_not_split_by_separator(monkeypatch):
     monkeypatch.setenv("USE_FARM_HASH_TO_BUCKETIZE", "true")
     fg = handler(id_feature("hash_bucket_size", default="1|2", separator="|"))
-    expected = farmhash.fingerprint64("1|2") % 100
+    expected = farmhash.Fingerprint64("1|2") % 100
     assert fg({"input": [None, "", []]})[0]["feature"] == [[expected]] * 3
     output, _ = fg.process_arrow({"input": pa.array([None, "", "1|2"], type=pa.string())})
     assert output["feature"].np_lengths.tolist() == [1, 1, 2]

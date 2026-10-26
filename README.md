@@ -42,9 +42,11 @@ exist so TorchEasyRec can import its sampler module when no sampler is configure
 ## Develop and test
 
 The deployment runtime is Python 3.11. `requirements-runtime.txt` pins NumPy,
-PyArrow and pyfarmhash for test environments. The TZRec Dockerfile pins NumPy and
-PyArrow directly; this project's Dockerfile pins pyfarmhash directly. Keep these
-versions and package metadata aligned when updating deployment dependencies.
+PyArrow and cityhash for test environments. The TZRec Dockerfile pins NumPy,
+PyArrow and cityhash directly, installing cityhash from a prebuilt wheel with
+`--only-binary=:all:`. Keep these versions and package metadata aligned when
+updating deployment dependencies. The cityhash distribution supplies the
+`farmhash.Fingerprint64` binding used for ID hashing.
 `requirements-test.txt` adds pytest and coverage. No version matrix or environment
 auto-discovery is used.
 
@@ -59,8 +61,8 @@ python3.11 -m venv .venv/test
 ```
 
 On Windows, use the environment's `Scripts/python.exe` instead of `bin/python`.
-Native dependencies must be available for Python 3.11; this change does not add
-Windows FarmHash support. An activated environment can simply run:
+Native dependencies must be available for Python 3.11. An activated environment
+can simply run:
 
 ```sh
 python scripts/test.py
@@ -127,7 +129,8 @@ the original pyfg/graphlearn wheels and its existing integration checks.
 
 Image dependency versions are written directly in the Dockerfiles; no compat
 requirements file or test configuration is copied into the TZRec image. The
-standalone compatibility Dockerfile only builds wheels; it has no test or oracle
+standalone compatibility Dockerfile builds only the pure-Python pyfg and graphlearn
+wheels; cityhash is installed from PyPI in the ARM TZRec image. It has no test or oracle
 stages. Push changes to this repository and the parent workflow together.
 
 To test a locally built native ARM TZRec image, run from this repository:

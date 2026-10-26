@@ -165,7 +165,7 @@ class FgArrowHandler:
                 f"pyfg feature {feature.name!r}: hash_bucket_size requires "
                 "USE_FARM_HASH_TO_BUCKETIZE=true for cross-architecture parity"
             )
-        return farmhash.fingerprint64(str(token)) % feature.bucket_count
+        return farmhash.Fingerprint64(str(token)) % feature.bucket_count
 
     @classmethod
     def _encode_row(cls, feature: _Feature, value: Any) -> list[int]:

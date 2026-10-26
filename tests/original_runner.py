@@ -99,7 +99,7 @@ def main():
     assert sys.version_info[:2] == (3, 11), "Original oracle requires Python 3.11"
     for requirement in (Path(__file__).resolve().parents[1] / "requirements-runtime.txt").read_text(encoding="utf-8").splitlines():
         name, expected = requirement.split("==")
-        if name != "pyfarmhash":
+        if name != "cityhash":
             assert version(name) == expected, f"Original oracle requires {requirement}"
     request = json.load(sys.stdin)
     if "cases" in request:

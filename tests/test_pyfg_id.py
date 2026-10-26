@@ -53,7 +53,7 @@ def test_direct_numpy_integer_ids(dtype, kind, monkeypatch):
     monkeypatch.setenv("USE_FARM_HASH_TO_BUCKETIZE", "true")
     output, status = handler(kind, default="0")({"value": [dtype(2), None]})
     expected = [2, 0] if kind == "num_buckets" else [
-        farmhash.fingerprint64(token) % 100 for token in ("2", "0")
+        farmhash.Fingerprint64(token) % 100 for token in ("2", "0")
     ]
     assert status.ok()
     assert output["feature"] == [[value] for value in expected]
@@ -119,7 +119,7 @@ def test_arrow_string_lists_are_multivalue_ids(monkeypatch):
     expected_tokens = ["Action", "Adventure", "Sci-Fi", "unknown", "unknown", "Comedy"]
     np.testing.assert_array_equal(
         output["genres"].np_values,
-        [farmhash.fingerprint64(token) % 100 for token in expected_tokens],
+        [farmhash.Fingerprint64(token) % 100 for token in expected_tokens],
     )
     np.testing.assert_array_equal(output["genres"].np_lengths, [3, 1, 1, 1])
 
@@ -130,7 +130,7 @@ def test_arrow_string_lists_without_default_keep_empty_rows(monkeypatch):
         {"value": pa.array([["Action"], [], None], type=pa.list_(pa.string()))}
     )
     np.testing.assert_array_equal(
-        output["genres"].np_values, [farmhash.fingerprint64("Action") % 100]
+        output["genres"].np_values, [farmhash.Fingerprint64("Action") % 100]
     )
     np.testing.assert_array_equal(output["genres"].np_lengths, [1, 0, 0])
 

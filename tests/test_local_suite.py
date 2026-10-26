@@ -51,7 +51,7 @@ def test_runner_rejects_wrong_python_and_dependency_versions(monkeypatch):
         runner.check_environment(parser)
     assert error.value.code == 2
     monkeypatch.setattr(runner, "sys", SimpleNamespace(version_info=(3, 11), version="3.11.0"))
-    pins = {"numpy": "1.26.4", "pyarrow": "17.0.0", "pyfarmhash": "0.4.0"}
+    pins = {"numpy": "1.26.4", "pyarrow": "17.0.0", "cityhash": "0.4.10"}
     monkeypatch.setattr(runner, "version", lambda name: pins[name])
     assert runner.check_environment(parser)["numpy"] == "1.26.4"
     for name in pins:
